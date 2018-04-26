@@ -60,33 +60,21 @@ func (m *migrator) Migrate() error {
 			m.watcher.TruncateTableDidFinish(table.Name)
 		}
 
-		columnNamesForInsert := make([]string, len(table.Columns))
-		placeholders := make([]string, len(table.Columns))
-		for i := range table.Columns {
-			columnNamesForInsert[i] = fmt.Sprintf("`%s`", table.Columns[i].Name)
-			placeholders[i] = "?"
-		}
-
-		preparedStmt, err := m.dst.DB().Prepare(fmt.Sprintf(
-			"INSERT INTO %s (%s) VALUES (%s)",
-			table.Name,
-			strings.Join(columnNamesForInsert, ","),
-			strings.Join(placeholders, ","),
-		))
-		if err != nil {
-			return fmt.Errorf("failed creating prepared statement: %s", err)
-		}
-
 		var recordsInserted int64
 
 		m.watcher.TableMigrationDidStart(table.Name)
 
 		if table.HasColumn("id") {
-			err = migrateWithIDs(m.watcher, m.src, m.dst, table, &recordsInserted, preparedStmt)
+			recordsInserted, err = migrateWithIDs(m.watcher, m.src, m.dst, table)
 			if err != nil {
 				return fmt.Errorf("failed migrating table with ids: %s", err)
 			}
 		} else {
+			preparedStmt, err := preparedBulkInsert(m.dst, table, 1)
+			if err != nil {
+				return fmt.Errorf("failed creating prepared bulk insert statement: %s", err)
+			}
+
 			err = EachMissingRow(m.src, m.dst, table, func(scanArgs []interface{}) {
 				err = insert(preparedStmt, scanArgs)
 				if err != nil {
@@ -106,43 +94,39 @@ func (m *migrator) Migrate() error {
 	return nil
 }
 
-func migrateWithIDs(
-	watcher MigratorWatcher,
-	src DB,
-	dst DB,
-	table *Table,
-	recordsInserted *int64,
-	preparedStmt *sql.Stmt,
-) error {
+func migrateWithIDs(watcher MigratorWatcher, src DB, dst DB, table *Table) (int64, error) {
 	columnNamesForSelect := make([]string, len(table.Columns))
-	values := make([]interface{}, len(table.Columns))
-	scanArgs := make([]interface{}, len(table.Columns))
+	batchSize := 1000
+	var scanArgs, scanValues, values []interface{}
+	var preparedStmt *sql.Stmt
+	var preparedStmtSize int // number of rows the prepared statment can handle
+	var count int64          // number of rows inserted
+
 	for i := range table.Columns {
 		columnNamesForSelect[i] = table.Columns[i].Name
-		scanArgs[i] = &values[i]
 	}
 
 	// find ids already in dst
 	rows, err := dst.DB().Query(fmt.Sprintf("SELECT id FROM %s", table.Name))
 	if err != nil {
-		return fmt.Errorf("failed to select id from rows: %s", err)
+		return 0, fmt.Errorf("failed to select id from rows: %s", err)
 	}
 
 	var dstIDs []interface{}
 	for rows.Next() {
 		var id interface{}
 		if err = rows.Scan(&id); err != nil {
-			return fmt.Errorf("failed to scan id from row: %s", err)
+			return 0, fmt.Errorf("failed to scan id from row: %s", err)
 		}
 		dstIDs = append(dstIDs, id)
 	}
 
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("failed iterating through rows: %s", err)
+		return 0, fmt.Errorf("failed iterating through rows: %s", err)
 	}
 
 	if err = rows.Close(); err != nil {
-		return fmt.Errorf("failed closing rows: %s", err)
+		return 0, fmt.Errorf("failed closing rows: %s", err)
 	}
 
 	// select data for ids to migrate from src
@@ -163,32 +147,54 @@ func migrateWithIDs(
 
 	rows, err = src.DB().Query(stmt, dstIDs...)
 	if err != nil {
-		return fmt.Errorf("failed to select rows: %s", err)
+		return 0, fmt.Errorf("failed to select rows: %s", err)
 	}
 
-	for rows.Next() {
+	hasNext := rows.Next()
+	for hasNext {
+		scanArgs = make([]interface{}, len(table.Columns))
+		scanValues = make([]interface{}, len(table.Columns))
+		for i := range table.Columns {
+			scanArgs[i] = &scanValues[i]
+		}
 		if err = rows.Scan(scanArgs...); err != nil {
-			return fmt.Errorf("failed to scan row: %s", err)
+			return count, fmt.Errorf("failed to scan row: %s", err)
 		}
 
-		err = insert(preparedStmt, scanArgs)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to insert into %s: %s\n", table.Name, err)
-			continue
-		}
+		values = append(values, scanArgs...)
+		hasNext = rows.Next()
+		size := len(values) / len(table.Columns)
 
-		*recordsInserted++
+		if size >= batchSize || !hasNext {
+			if size != preparedStmtSize || preparedStmt == nil {
+				preparedStmt, err = preparedBulkInsert(dst, table, size)
+				preparedStmtSize = size
+
+				if err != nil {
+					return count, fmt.Errorf("failed creating prepared bulk insert statement for batch: %s", err)
+				}
+			}
+
+			err = insert(preparedStmt, values)
+			values = nil
+
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to insert into %s: %s\n", table.Name, err)
+				continue
+			}
+			count += int64(size)
+		}
 	}
 
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("failed iterating through rows: %s", err)
+		return count, fmt.Errorf("failed iterating through rows: %s", err)
 	}
 
 	if err = rows.Close(); err != nil {
-		return fmt.Errorf("failed closing rows: %s", err)
+		return count, fmt.Errorf("failed closing rows: %s", err)
 	}
 
-	return nil
+	return count, nil
 }
 
 func insert(stmt *sql.Stmt, values []interface{}) error {
@@ -207,4 +213,31 @@ func insert(stmt *sql.Stmt, values []interface{}) error {
 	}
 
 	return nil
+}
+
+func preparedBulkInsert(db DB, table *Table, size int) (*sql.Stmt, error) {
+	columnNamesForInsert := make([]string, len(table.Columns))
+	placeholders := make([]string, len(table.Columns))
+	values := make([]string, size)
+	for i := range table.Columns {
+		columnNamesForInsert[i] = fmt.Sprintf("`%s`", table.Columns[i].Name)
+		placeholders[i] = "?"
+	}
+
+	holders := strings.Join(placeholders, ",")
+	for i := 0; i < size; i++ {
+		values[i] = fmt.Sprintf("(%s)", holders)
+	}
+
+	preparedStmt, err := db.DB().Prepare(fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES %s",
+		table.Name,
+		strings.Join(columnNamesForInsert, ","),
+		strings.Join(values, ","),
+	))
+	if err != nil {
+		return preparedStmt, fmt.Errorf("failed creating prepared statement: %s", err)
+	}
+
+	return preparedStmt, nil
 }
