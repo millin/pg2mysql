@@ -150,6 +150,12 @@ func migrateWithIDs(watcher MigratorWatcher, src DB, dst DB, table *Table) (int6
 		return 0, fmt.Errorf("failed to select rows: %s", err)
 	}
 
+	tx, err := dst.DB().Begin()
+	if err != nil {
+		return 0, fmt.Errorf("failed begin transaction: %s", err)
+	}
+	defer tx.Commit()
+
 	hasNext := rows.Next()
 	for hasNext {
 		scanArgs = make([]interface{}, len(table.Columns))
@@ -175,7 +181,7 @@ func migrateWithIDs(watcher MigratorWatcher, src DB, dst DB, table *Table) (int6
 				}
 			}
 
-			err = insert(preparedStmt, values)
+			err = insert(tx.Stmt(preparedStmt), values)
 			values = nil
 
 			if err != nil {
