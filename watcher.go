@@ -2,6 +2,8 @@ package pg2mysql
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 )
 
@@ -37,24 +39,41 @@ type MigratorWatcher interface {
 }
 
 func NewStdoutPrinter() *StdoutPrinter {
-	return &StdoutPrinter{}
+	return NewPrinter(os.Stdout)
 }
 
-type StdoutPrinter struct{}
+func NewPrinter(w io.Writer) *StdoutPrinter {
+	return &StdoutPrinter{
+		writer: w,
+	}
+}
+
+type StdoutPrinter struct {
+	writer io.Writer
+}
+
+func (s *StdoutPrinter) write(format string, a ...interface{}) {
+	fmt.Fprintf(s.writer, format, a...)
+}
+
+func (s *StdoutPrinter) writeln(format string, a ...interface{}) {
+	s.write(format, a...)
+	s.write("\n")
+}
 
 func (s *StdoutPrinter) TableVerificationDidStart(tableName string) {
-	fmt.Printf("Verifying table %s...", tableName)
+	s.write("Verifying table %s...", tableName)
 }
 
 func (s *StdoutPrinter) TableVerificationDidFinish(tableName string, missingRows int64, missingIDs []string) {
 	if missingRows != 0 {
 		if missingRows == 1 {
-			fmt.Println("\n\tFAILED: 1 row missing")
+			s.writeln("\n\tFAILED: 1 row missing")
 		} else {
-			fmt.Printf("\n\tFAILED: %d rows missing\n", missingRows)
+			s.write("\n\tFAILED: %d rows missing\n", missingRows)
 		}
 		if missingIDs != nil {
-			fmt.Printf("\tMissing IDs: %v\n", strings.Join(missingIDs, ","))
+			s.write("\tMissing IDs: %v\n", strings.Join(missingIDs, ","))
 		}
 	} else {
 		s.done()
@@ -62,15 +81,15 @@ func (s *StdoutPrinter) TableVerificationDidFinish(tableName string, missingRows
 }
 
 func (s *StdoutPrinter) done() {
-	fmt.Println("OK")
+	s.writeln("OK")
 }
 
 func (s *StdoutPrinter) TableVerificationDidFinishWithError(tableName string, err error) {
-	fmt.Printf("failed: %s", err)
+	s.write("failed: %s", err)
 }
 
 func (s *StdoutPrinter) WillBuildSchema() {
-	fmt.Print("Building schema...")
+	s.write("Building schema...")
 }
 
 func (s *StdoutPrinter) DidBuildSchema() {
@@ -78,7 +97,7 @@ func (s *StdoutPrinter) DidBuildSchema() {
 }
 
 func (s *StdoutPrinter) WillDisableConstraints() {
-	fmt.Print("Disabling constraints...")
+	s.write("Disabling constraints...")
 }
 
 func (s *StdoutPrinter) DidDisableConstraints() {
@@ -90,11 +109,11 @@ func (s *StdoutPrinter) DidFailToDisableConstraints(err error) {
 }
 
 func (s *StdoutPrinter) WillEnableConstraints() {
-	fmt.Print("Enabling constraints...")
+	s.write("Enabling constraints...")
 }
 
 func (s *StdoutPrinter) EnableConstraintsDidFailWithError(err error) {
-	fmt.Printf("failed: %s", err)
+	s.write("failed: %s", err)
 }
 
 func (s *StdoutPrinter) EnableConstraintsDidFinish() {
@@ -102,7 +121,7 @@ func (s *StdoutPrinter) EnableConstraintsDidFinish() {
 }
 
 func (s *StdoutPrinter) WillTruncateTable(tableName string) {
-	fmt.Printf("Truncating %s...", tableName)
+	s.write("Truncating %s...", tableName)
 }
 
 func (s *StdoutPrinter) TruncateTableDidFinish(tableName string) {
@@ -110,24 +129,24 @@ func (s *StdoutPrinter) TruncateTableDidFinish(tableName string) {
 }
 
 func (s *StdoutPrinter) TableMigrationDidStart(tableName string) {
-	fmt.Printf("Migrating %s...", tableName)
+	s.write("Migrating %s...", tableName)
 }
 
 func (s *StdoutPrinter) TableMigrationDidFinish(tableName string, recordsInserted int64) {
 	switch recordsInserted {
 	case 0:
-		fmt.Println("OK (0 records inserted)")
+		s.writeln("OK (0 records inserted)")
 	case 1:
-		fmt.Println("OK\n  inserted 1 row")
+		s.writeln("OK\n  inserted 1 row")
 	default:
-		fmt.Printf("OK\n  inserted %d rows\n", recordsInserted)
+		s.write("OK\n  inserted %d rows\n", recordsInserted)
 	}
 }
 
 func (s *StdoutPrinter) DidMigrateRow(tableName string) {
-	fmt.Printf(".")
+	s.write(".")
 }
 
 func (s *StdoutPrinter) DidFailToMigrateRowWithError(tableName string, err error) {
-	fmt.Printf("x")
+	s.write("x")
 }
