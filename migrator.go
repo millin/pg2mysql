@@ -12,11 +12,12 @@ type Migrator interface {
 	Migrate() error
 }
 
-func NewMigrator(src, dst DB, truncateFirst bool, watcher MigratorWatcher) Migrator {
+func NewMigrator(src, dst DB, truncateFirst bool, workers int, watcher MigratorWatcher) Migrator {
 	return &migrator{
 		src:           src,
 		dst:           dst,
 		truncateFirst: truncateFirst,
+		workers:       workers,
 		watcher:       watcher,
 	}
 }
@@ -24,6 +25,7 @@ func NewMigrator(src, dst DB, truncateFirst bool, watcher MigratorWatcher) Migra
 type migrator struct {
 	src, dst      DB
 	truncateFirst bool
+	workers       int
 	watcher       MigratorWatcher
 }
 
@@ -50,46 +52,81 @@ func (m *migrator) Migrate() error {
 		}
 	}()
 
-	for _, table := range srcSchema.Tables {
-		if m.truncateFirst {
-			m.watcher.WillTruncateTable(table.Name)
-			_, err := m.dst.DB().Exec(fmt.Sprintf("TRUNCATE TABLE %s", table.Name))
-			if err != nil {
-				return fmt.Errorf("failed truncating: %s", err)
-			}
-			m.watcher.TruncateTableDidFinish(table.Name)
-		}
+	jobs := make(chan *Table, len(srcSchema.Tables))
+	results := make(chan error, len(srcSchema.Tables))
 
-		var recordsInserted int64
-
-		m.watcher.TableMigrationDidStart(table.Name)
-
-		if table.HasColumn("id") {
-			recordsInserted, err = migrateWithIDs(m.watcher, m.src, m.dst, table)
-			if err != nil {
-				return fmt.Errorf("failed migrating table with ids: %s", err)
-			}
-		} else {
-			preparedStmt, err := preparedBulkInsert(m.dst, table, 1)
-			if err != nil {
-				return fmt.Errorf("failed creating prepared bulk insert statement: %s", err)
-			}
-
-			err = EachMissingRow(m.src, m.dst, table, func(scanArgs []interface{}) {
-				err = insert(preparedStmt, scanArgs)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "failed to insert into %s: %s\n", table.Name, err)
-					return
-				}
-				recordsInserted++
-			})
-			if err != nil {
-				return fmt.Errorf("failed migrating table without ids: %s", err)
-			}
-		}
-
-		m.watcher.TableMigrationDidFinish(table.Name, recordsInserted)
+	for w := 1; w <= m.workers; w++ {
+		go migrateWorker(w, m, jobs, results)
 	}
+
+	for _, table := range srcSchema.Tables {
+		jobs <- table
+	}
+	close(jobs)
+
+	var errHappened bool
+	for _ = range srcSchema.Tables {
+		err := <-results
+		if err != nil {
+			errHappened = true
+			fmt.Fprintf(os.Stderr, "worker error: %s\n", err)
+		}
+	}
+	if errHappened {
+		return errors.New("migration failed")
+	}
+
+	return nil
+}
+
+func migrateWorker(id int, m *migrator, jobs <-chan *Table, results chan<- error) {
+	for j := range jobs {
+		err := migrateTable(m, j)
+		results <- err
+	}
+}
+
+func migrateTable(m *migrator, table *Table) error {
+	var err error
+
+	if m.truncateFirst {
+		m.watcher.WillTruncateTable(table.Name)
+		_, err := m.dst.DB().Exec(fmt.Sprintf("TRUNCATE TABLE %s", table.Name))
+		if err != nil {
+			return fmt.Errorf("failed truncating: %s", err)
+		}
+		m.watcher.TruncateTableDidFinish(table.Name)
+	}
+
+	var recordsInserted int64
+
+	m.watcher.TableMigrationDidStart(table.Name)
+
+	if table.HasColumn("id") {
+		recordsInserted, err = migrateWithIDs(m.watcher, m.src, m.dst, table)
+		if err != nil {
+			return fmt.Errorf("failed migrating table with ids: %s", err)
+		}
+	} else {
+		preparedStmt, err := preparedBulkInsert(m.dst, table, 1)
+		if err != nil {
+			return fmt.Errorf("failed creating prepared bulk insert statement: %s", err)
+		}
+
+		err = EachMissingRow(m.src, m.dst, table, func(scanArgs []interface{}) {
+			err = insert(preparedStmt, scanArgs)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to insert into %s: %s\n", table.Name, err)
+				return
+			}
+			recordsInserted++
+		})
+		if err != nil {
+			return fmt.Errorf("failed migrating table without ids: %s", err)
+		}
+	}
+
+	m.watcher.TableMigrationDidFinish(table.Name, recordsInserted)
 
 	return nil
 }

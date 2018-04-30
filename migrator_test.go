@@ -43,7 +43,7 @@ var _ = Describe("Migrator", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		watcher = &pg2mysqlfakes.FakeMigratorWatcher{}
-		migrator = pg2mysql.NewMigrator(pg, mysql, truncateFirst, watcher)
+		migrator = pg2mysql.NewMigrator(pg, mysql, truncateFirst, 1, watcher)
 	})
 
 	AfterEach(func() {
