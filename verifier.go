@@ -1,6 +1,9 @@
 package pg2mysql
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 type Verifier interface {
 	Verify() error
@@ -25,6 +28,7 @@ func (v *verifier) Verify() error {
 		return fmt.Errorf("failed to build source schema: %s", err)
 	}
 
+	var verifyErr error
 	for _, table := range srcSchema.Tables {
 		v.watcher.TableVerificationDidStart(table.Name)
 
@@ -46,7 +50,11 @@ func (v *verifier) Verify() error {
 		}
 
 		v.watcher.TableVerificationDidFinish(table.Name, missingRows, missingIDs)
+
+		if missingRows > 0 {
+			verifyErr = errors.New("varify failed")
+		}
 	}
 
-	return nil
+	return verifyErr
 }
