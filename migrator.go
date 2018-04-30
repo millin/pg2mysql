@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -64,6 +65,17 @@ func (m *migrator) Migrate() error {
 
 		m.watcher.TableMigrationDidStart(table.Name)
 
+		// TODO: likely just only run this if truncating... idk.
+		if table.HasColumn("id") {
+			recordsInserted, err = migrateByCsvFile(m.watcher, m.src, m.dst, table)
+			if err != nil {
+				return fmt.Errorf("failed migrating table with ids: %s", err)
+			} else {
+				m.watcher.TableMigrationDidFinish(table.Name, recordsInserted)
+				return nil
+			}
+		}
+
 		if table.HasColumn("id") {
 			recordsInserted, err = migrateWithIDs(m.watcher, m.src, m.dst, table)
 			if err != nil {
@@ -92,6 +104,106 @@ func (m *migrator) Migrate() error {
 	}
 
 	return nil
+}
+
+func migrateByCsvFile(watcher MigratorWatcher, src DB, dst DB, table *Table) (int64, error) {
+	columnNamesForSelect := make([]string, len(table.Columns))
+	for i := range table.Columns {
+		columnNamesForSelect[i] = table.Columns[i].Name
+	}
+
+	// find ids already in dst
+	rows, err := dst.DB().Query(fmt.Sprintf("SELECT id FROM %s", table.Name))
+	if err != nil {
+		return 0, fmt.Errorf("failed to select id from rows: %s", err)
+	}
+
+	var dstIDs []interface{}
+	for rows.Next() {
+		var id interface{}
+		if err = rows.Scan(&id); err != nil {
+			return 0, fmt.Errorf("failed to scan id from row: %s", err)
+		}
+		dstIDs = append(dstIDs, id)
+	}
+
+	if err = rows.Err(); err != nil {
+		return 0, fmt.Errorf("failed iterating through rows: %s", err)
+	}
+
+	if err = rows.Close(); err != nil {
+		return 0, fmt.Errorf("failed closing rows: %s", err)
+	}
+
+	// select data for ids to migrate from src
+	stmt := fmt.Sprintf(
+		"SELECT %s FROM %s",
+		strings.Join(columnNamesForSelect, ","),
+		table.Name,
+	)
+
+	if len(dstIDs) > 0 {
+		placeholders := make([]string, len(dstIDs))
+		for i := range dstIDs {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+
+		stmt = fmt.Sprintf("%s WHERE id NOT IN (%s)", stmt, strings.Join(placeholders, ","))
+	}
+	file := fmt.Sprintf("/tmp/%s.csv", table.Name)
+
+	// This doesn't do anything unless you are on the same server.
+	if _, err := os.Stat(file); err == nil {
+		err = os.Remove(file)
+		if err != nil {
+			return 0, fmt.Errorf("failed to remove CSV file: %s", err)
+		}
+	}
+
+	stmt = fmt.Sprintf("COPY (%s) TO '%s' WITH CSV DELIMITER ','", stmt, file)
+
+	_, err = src.DB().Exec(stmt, dstIDs...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write rows to CSV: %s", err)
+	}
+	cmd := exec.Command("chown", "mysql:mysql", file)
+	err = cmd.Run()
+	if err != nil {
+		return 0, fmt.Errorf("failed to chown CSV file: %s", err)
+	}
+
+	// err = os.Chmod(file, 0777)
+	// if err != nil {
+	// 	return 0, fmt.Errorf("failed to chmod CSV file: %s", err)
+	// }
+	// err = os.Chown(file, os.Getuid(), os.Getgid())
+	// if err != nil {
+	// 	return 0, fmt.Errorf("failed to chown CSV file: %s", err)
+	// }
+
+	stmt = fmt.Sprintf("LOAD DATA INFILE '%s' INTO TABLE %s FIELDS TERMINATED BY ',' ENCLOSED BY '\"' LINES TERMINATED BY '\r\n' (%s)", file, table.Name, strings.Join(columnNamesForSelect, ","))
+	result, err := dst.DB().Exec(stmt)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read rows from CSV for table %s: %s", table.Name, err)
+	}
+	// This doesn't do anything unless you are on the same server.
+	if _, err := os.Stat(file); err == nil {
+		err = os.Remove(file)
+		if err != nil {
+			return 0, fmt.Errorf("failed to remove CSV file: %s", err)
+		}
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed getting rows affected by insert: %s", err)
+	}
+
+	// TODO: uncomment and then detect and skip empty tables.
+	// if rowsAffected == 0 {
+	// 	return 0, errors.New("no rows affected by insert")
+	// }
+
+	return rowsAffected, nil
 }
 
 func migrateWithIDs(watcher MigratorWatcher, src DB, dst DB, table *Table) (int64, error) {
