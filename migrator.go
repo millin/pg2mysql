@@ -123,13 +123,14 @@ func migrateTable(truncate bool, watcher MigratorWatcher, src DB, dst DB, table 
 			return fmt.Errorf("failed creating prepared bulk insert statement: %s", err)
 		}
 
-		err = EachMissingRow(src, dst, table, func(scanArgs []interface{}) {
-			err = insert(preparedStmt, scanArgs)
+		err = EachMissingRow(src, dst, table, func(scanArgs []interface{}) error {
+			err := insert(preparedStmt, scanArgs)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to insert into %s: %s\n", table.Name, err)
-				return
+				return fmt.Errorf("failed to insert into %s: %s\n", table.Name, err)
 			}
 			recordsInserted++
+
+			return nil
 		})
 		if err != nil {
 			return fmt.Errorf("failed migrating table without ids: %s", err)
@@ -232,8 +233,7 @@ func migrateWithIDs(src DB, dst DB, table *Table) (int64, error) {
 			values = nil
 
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to insert into %s: %s\n", table.Name, err)
-				continue
+				return count, fmt.Errorf("failed to insert into %s: %s\n", table.Name, err)
 			}
 			count += int64(size)
 		}

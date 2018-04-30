@@ -203,7 +203,7 @@ func GetIncompatibleRowCount(db DB, src, dst *Table) (int64, error) {
 	return count, nil
 }
 
-func EachMissingRow(src, dst DB, table *Table, f func([]interface{})) error {
+func EachMissingRow(src, dst DB, table *Table, f func([]interface{}) error) error {
 	srcColumnNamesForSelect := make([]string, len(table.Columns))
 	values := make([]interface{}, len(table.Columns))
 	scanArgs := make([]interface{}, len(table.Columns))
@@ -253,7 +253,9 @@ func EachMissingRow(src, dst DB, table *Table, f func([]interface{})) error {
 		}
 
 		if !exists {
-			f(scanArgs)
+			if err = f(scanArgs); err != nil {
+				return fmt.Errorf("failed to insert row: %s", err)
+			}
 		}
 	}
 

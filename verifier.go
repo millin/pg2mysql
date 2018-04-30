@@ -30,13 +30,15 @@ func (v *verifier) Verify() error {
 
 		var missingRows int64
 		var missingIDs []string
-		err = EachMissingRow(v.src, v.dst, table, func(scanArgs []interface{}) {
+		err = EachMissingRow(v.src, v.dst, table, func(scanArgs []interface{}) error {
 			if colIndex, _, getColErr := table.GetColumn("id"); getColErr == nil {
 				if colID, ok := scanArgs[colIndex].(*interface{}); ok {
 					missingIDs = append(missingIDs, fmt.Sprintf("%v", *colID))
 				}
 			}
 			missingRows++
+
+			return nil
 		})
 		if err != nil {
 			v.watcher.TableVerificationDidFinishWithError(table.Name, err)
