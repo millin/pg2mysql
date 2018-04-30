@@ -2,12 +2,14 @@ package commands
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/mrmark/pg2mysql"
 )
 
 type MigrateCommand struct {
 	Truncate bool `long:"truncate" description:"Truncate destination tables before migrating data"`
+	Workers  int  `long:"workers" description:"Migrate this many tables in goroutines"`
 }
 
 func (c *MigrateCommand) Execute([]string) error {
@@ -39,8 +41,16 @@ func (c *MigrateCommand) Execute([]string) error {
 	}
 	defer pg.Close()
 
+	if c.Workers > runtime.NumCPU() {
+		// though this is technically valid and OK, it does not help with performance I would think.
+		return fmt.Errorf("number of workers exceeds number of CPUs (%d > %d)", c.Workers, runtime.NumCPU())
+	}
+	if c.Workers < 1 {
+		c.Workers = 1
+	}
+
 	watcher := pg2mysql.NewStdoutPrinter()
-	err = pg2mysql.NewMigrator(pg, mysql, c.Truncate, watcher).Migrate()
+	err = pg2mysql.NewMigrator(pg, mysql, c.Truncate, c.Workers, watcher).Migrate()
 	if err != nil {
 		return fmt.Errorf("failed migrating: %s", err)
 	}
