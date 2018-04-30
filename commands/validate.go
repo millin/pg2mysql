@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/mrmark/pg2mysql"
@@ -42,18 +43,22 @@ func (c *ValidateCommand) Execute([]string) error {
 		return fmt.Errorf("failed to validate: %s", err)
 	}
 
+	validateErr := errors.New("found incompatible rows")
+	err = nil
 	for _, result := range results {
 		switch {
 		case len(result.IncompatibleRowIDs) > 0:
 			fmt.Printf("found %d incompatible rows in %s with IDs %v\n", result.IncompatibleRowCount, result.TableName, result.IncompatibleRowIDs)
+			err = validateErr
 
 		case result.IncompatibleRowCount > 0:
 			fmt.Printf("found %d incompatible rows in %s (which has no 'id' column)\n", result.IncompatibleRowCount, result.TableName)
+			err = validateErr
 
 		default:
 			fmt.Printf("%s OK\n", result.TableName)
 		}
 	}
 
-	return nil
+	return err
 }
