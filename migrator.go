@@ -81,39 +81,51 @@ func (m *migrator) Migrate() error {
 
 func migrateWorker(id int, m *migrator, jobs <-chan *Table, results chan<- error) {
 	for j := range jobs {
-		err := migrateTable(m, j)
+		var watcher MigratorWatcher
+		buffer := new(strings.Builder)
+		if m.workers > 1 {
+			watcher = NewPrinter(buffer) // this currently breaks the idea of a MigratorWatcher
+		} else {
+			watcher = m.watcher
+		}
+
+		err := migrateTable(m.truncateFirst, watcher, m.src, m.dst, j)
+
+		if buffer.Len() > 0 {
+			fmt.Print(buffer.String())
+		}
 		results <- err
 	}
 }
 
-func migrateTable(m *migrator, table *Table) error {
+func migrateTable(truncate bool, watcher MigratorWatcher, src DB, dst DB, table *Table) error {
 	var err error
 
-	if m.truncateFirst {
-		m.watcher.WillTruncateTable(table.Name)
-		_, err := m.dst.DB().Exec(fmt.Sprintf("TRUNCATE TABLE %s", table.Name))
+	if truncate {
+		watcher.WillTruncateTable(table.Name)
+		_, err := dst.DB().Exec(fmt.Sprintf("TRUNCATE TABLE %s", table.Name))
 		if err != nil {
 			return fmt.Errorf("failed truncating: %s", err)
 		}
-		m.watcher.TruncateTableDidFinish(table.Name)
+		watcher.TruncateTableDidFinish(table.Name)
 	}
 
 	var recordsInserted int64
 
-	m.watcher.TableMigrationDidStart(table.Name)
+	watcher.TableMigrationDidStart(table.Name)
 
 	if table.HasColumn("id") {
-		recordsInserted, err = migrateWithIDs(m.watcher, m.src, m.dst, table)
+		recordsInserted, err = migrateWithIDs(src, dst, table)
 		if err != nil {
 			return fmt.Errorf("failed migrating table with ids: %s", err)
 		}
 	} else {
-		preparedStmt, err := preparedBulkInsert(m.dst, table, 1)
+		preparedStmt, err := preparedBulkInsert(dst, table, 1)
 		if err != nil {
 			return fmt.Errorf("failed creating prepared bulk insert statement: %s", err)
 		}
 
-		err = EachMissingRow(m.src, m.dst, table, func(scanArgs []interface{}) {
+		err = EachMissingRow(src, dst, table, func(scanArgs []interface{}) {
 			err = insert(preparedStmt, scanArgs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "failed to insert into %s: %s\n", table.Name, err)
@@ -126,12 +138,12 @@ func migrateTable(m *migrator, table *Table) error {
 		}
 	}
 
-	m.watcher.TableMigrationDidFinish(table.Name, recordsInserted)
+	watcher.TableMigrationDidFinish(table.Name, recordsInserted)
 
 	return nil
 }
 
-func migrateWithIDs(watcher MigratorWatcher, src DB, dst DB, table *Table) (int64, error) {
+func migrateWithIDs(src DB, dst DB, table *Table) (int64, error) {
 	columnNamesForSelect := make([]string, len(table.Columns))
 	batchSize := 1000
 	var scanArgs, scanValues, values []interface{}
