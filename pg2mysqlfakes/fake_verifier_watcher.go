@@ -4,7 +4,7 @@ package pg2mysqlfakes
 import (
 	"sync"
 
-	"github.com/pivotal-cf/pg2mysql"
+	"github.com/mrmark/pg2mysql"
 )
 
 type FakeVerifierWatcher struct {
