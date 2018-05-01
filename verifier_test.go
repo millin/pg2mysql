@@ -73,7 +73,7 @@ var _ = Describe("Verifier", func() {
 
 			It("notifies the watcher", func() {
 				err := verifier.Verify()
-				Expect(err).NotTo(HaveOccurred())
+				Expect(err).To(HaveOccurred())
 				Expect(watcher.TableVerificationDidFinishCallCount()).To(Equal(3))
 
 				expected := map[string]int64{

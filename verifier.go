@@ -44,16 +44,15 @@ func (v *verifier) Verify() error {
 
 			return nil
 		})
+		if missingRows > 0 || err != nil {
+			verifyErr = errors.New("verify failed")
+		}
 		if err != nil {
 			v.watcher.TableVerificationDidFinishWithError(table.Name, err)
 			continue
 		}
 
 		v.watcher.TableVerificationDidFinish(table.Name, missingRows, missingIDs)
-
-		if missingRows > 0 {
-			verifyErr = errors.New("varify failed")
-		}
 	}
 
 	return verifyErr
