@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mrmark/pg2mysql"
-	"github.com/mrmark/pg2mysql/pg2mysqlfakes"
+	"github.com/millin/pg2mysql"
+	"github.com/millin/pg2mysql/pg2mysqlfakes"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

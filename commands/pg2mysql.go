@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/mrmark/pg2mysql"
+	"github.com/millin/pg2mysql"
 
 	yaml "gopkg.in/yaml.v2"
 )

@@ -1,7 +1,7 @@
 package pg2mysql_test
 
 import (
-	"github.com/mrmark/pg2mysql"
+	"github.com/millin/pg2mysql"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

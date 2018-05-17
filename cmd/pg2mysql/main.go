@@ -4,7 +4,7 @@ import (
 	"log"
 
 	flags "github.com/jessevdk/go-flags"
-	"github.com/mrmark/pg2mysql/commands"
+	"github.com/millin/pg2mysql/commands"
 )
 
 func main() {

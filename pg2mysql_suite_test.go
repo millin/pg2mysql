@@ -5,8 +5,8 @@ import (
 	"io/ioutil"
 	"path/filepath"
 
-	"github.com/mrmark/pg2mysql/mysqlrunner"
-	"github.com/mrmark/pg2mysql/postgresrunner"
+	"github.com/millin/pg2mysql/mysqlrunner"
+	"github.com/millin/pg2mysql/postgresrunner"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 

@@ -19,7 +19,7 @@ PostgreSQL to MySQL.
 ## Install from source
 
 ```
-go get github.com/mrmark/pg2mysql/cmd/pg2mysql
+go get github.com/millin/pg2mysql/cmd/pg2mysql
 ```
 
 ## Usage

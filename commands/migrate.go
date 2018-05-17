@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/mrmark/pg2mysql"
+	"github.com/millin/pg2mysql"
 )
 
 type MigrateCommand struct {
