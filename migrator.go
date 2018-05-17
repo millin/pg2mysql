@@ -101,7 +101,7 @@ func migrateTable(truncate bool, watcher MigratorWatcher, src DB, dst DB, table 
 
 	if truncate {
 		watcher.WillTruncateTable(table.Name)
-		_, err := dst.DB().Exec(fmt.Sprintf("TRUNCATE TABLE %s", table.Name))
+		_, err := dst.DB().Exec(fmt.Sprintf("TRUNCATE TABLE `%s`", table.Name))
 		if err != nil {
 			return fmt.Errorf("failed truncating: %s", err)
 		}
