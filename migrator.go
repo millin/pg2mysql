@@ -155,7 +155,7 @@ func migrateWithIDs(src DB, dst DB, table *Table) (int64, error) {
 	}
 
 	// find ids already in dst
-	rows, err := dst.DB().Query(fmt.Sprintf("SELECT id FROM %s", table.Name))
+	rows, err := dst.DB().Query(fmt.Sprintf("SELECT id FROM `%s`", table.Name))
 	if err != nil {
 		return 0, fmt.Errorf("failed to select id from rows: %s", err)
 	}
