@@ -283,7 +283,7 @@ func preparedBulkInsert(db DB, table *Table, size int) (*sql.Stmt, error) {
 	}
 
 	preparedStmt, err := db.DB().Prepare(fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES %s",
+		"INSERT INTO `%s` (%s) VALUES %s",
 		table.Name,
 		strings.Join(columnNamesForInsert, ","),
 		strings.Join(values, ","),
