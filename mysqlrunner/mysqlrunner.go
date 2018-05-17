@@ -32,7 +32,7 @@ func (runner *Runner) Setup() error {
 		return err
 	}
 
-	_, err = dbConn.Exec(fmt.Sprintf("CREATE DATABASE %s", runner.DBName))
+	_, err = dbConn.Exec(fmt.Sprintf("CREATE DATABASE `%s`", runner.DBName))
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func (runner *Runner) Setup() error {
 
 func (runner *Runner) Teardown() error {
 	if runner.dbConn != nil {
-		_, err := runner.dbConn.Exec(fmt.Sprintf("DROP DATABASE %s", runner.DBName))
+		_, err := runner.dbConn.Exec(fmt.Sprintf("DROP DATABASE `%s`", runner.DBName))
 		if err != nil {
 			return err
 		}
@@ -87,9 +87,9 @@ func (runner *Runner) Truncate() error {
 			return err
 		}
 
-		_, err = runner.dbConn.Exec(fmt.Sprintf(`
-			SET FOREIGN_KEY_CHECKS = 0;
-			TRUNCATE TABLE %s.%s;
+		_, err = runner.dbConn.Exec(fmt.Sprintf(
+			`SET FOREIGN_KEY_CHECKS = 0;
+			TRUNCATE TABLE \'%s\'.\'%s\';
 			SET FOREIGN_KEY_CHECKS = 1`,
 			runner.DBName, tableName))
 		if err != nil {
